@@ -7,34 +7,34 @@
     <style>
         body { font-family: sans-serif; background: #f5f7fa; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: white; padding: 2.5rem 2rem; border-radius: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); width: 380px; text-align: center; }
-        .badge { padding: 8px 18px; border-radius: 50px; font-weight: bold; display: inline-block; margin-bottom: 25px; font-size: 14px; }
+        .badge { padding: 8px 18px; border-radius: 50px; font-weight: bold; display: inline-block; margin-bottom: 20px; font-size: 14px; }
         .free { background: #e3f2fd; color: #1976d2; }
         .busy { background: #fff1f2; color: #e11d48; }
         .user-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
-        .user-item { border: 1px solid #eee; padding: 12px; border-radius: 12px; cursor: pointer; transition: 0.2s; }
+        .user-item { border: 1px solid #eee; padding: 12px; border-radius: 12px; cursor: pointer; }
         .user-item.selected { border: 2px solid #e11d48; background: #fff1f2; color: #e11d48; font-weight: bold; }
-        button { width: 100%; padding: 15px; border: none; border-radius: 12px; font-size: 16px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button { width: 100%; padding: 15px; border: none; border-radius: 12px; font-size: 16px; cursor: pointer; font-weight: bold; }
         .btn-in { background: #e11d48; color: white; }
         .btn-out { background: #e11d48; color: white; margin-top: 15px; }
-        .time-info { background: #f8fafc; padding: 15px; border-radius: 12px; margin: 20px 0; font-size: 14px; color: #64748b; line-height: 1.6; }
-        .timer-highlight { color: #e11d48; font-weight: bold; font-size: 16px; }
-        .warning-text { color: #f43f5e; font-size: 13px; margin-top: 15px; font-weight: bold; display: block; }
-        .hidden { display: none; }
+        .time-box { background: #f8fafc; padding: 15px; border-radius: 12px; margin: 15px 0; font-size: 14px; color: #475569; text-align: left; border: 1px solid #f1f5f9; }
+        .timer-val { color: #e11d48; font-weight: bold; font-size: 16px; float: right; }
+        .warning { color: #f43f5e; font-size: 12px; margin-top: 15px; font-weight: bold; display: block; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
 
 <div class="card">
     <div id="statusBadge" class="badge free">✅ 사용 가능</div>
-    <h2 id="statusTitle" style="margin-bottom: 10px;">현재 비어있음</h2>
+    <h2 id="statusTitle">현재 비어있음</h2>
 
-    <div id="timeDisplay" class="time-info hidden">
-        <div>접속 시간: <span id="startTimeText">-</span></div>
-        <div style="margin-top: 5px;">현재 <span id="durationText" class="timer-highlight">0시간 0분 0초</span> 째 사용 중</div>
+    <div id="timeDisplay" class="time-box hidden">
+        <div style="margin-bottom:8px;">📅 접속 시간: <span id="startTimeText" style="font-weight:600;">-</span></div>
+        <div>⏳ 경과 시간: <span id="durationText" class="timer-val">0시간 0분 0초</span></div>
     </div>
 
     <div id="loginArea">
-        <p style="color: #666;">누가 사용하시나요?</p>
+        <p style="color: #666; font-size: 14px;">누가 사용하시나요?</p>
         <div class="user-list">
             <div class="user-item" onclick="sel('재현')">재현</div>
             <div class="user-item" onclick="sel('현우')">현우</div>
@@ -46,7 +46,7 @@
 
     <div id="logoutArea" class="hidden">
         <button class="btn-out" onclick="disconnect()">접속 종료</button>
-        <span class="warning-text">⚠️ 본인 외에 누르지 마세요</span>
+        <span class="warning">⚠️ 본인 외에 누르지 마세요</span>
     </div>
 </div>
 
@@ -60,10 +60,10 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
-    const dbRef = ref(db, 'room/status');
+    const dbRef = ref(db, 'simulation/status'); // 경로를 명확히 지정
 
     let myName = "";
-    let timerInterval = null;
+    let interval = null;
 
     window.sel = (name) => {
         myName = name;
@@ -72,71 +72,65 @@
     };
 
     window.connect = () => {
-        // serverTimestamp를 사용하여 서버의 정확한 시간을 기록합니다.
+        // 현재 로컬 시간도 백업용으로 함께 저장
         set(dbRef, { 
             user: myName, 
             active: true, 
-            startTime: serverTimestamp() 
+            startTime: serverTimestamp(),
+            localStartTime: Date.now() 
         });
     };
 
     window.disconnect = () => {
-        if(confirm("정말로 접속을 종료하시겠습니까?")) {
+        if(confirm("접속을 종료할까요?")) {
             set(dbRef, { user: "", active: false, startTime: null });
         }
     };
 
-    // 경과 시간 계산 함수
-    function updateTimer(startMillis) {
-        const now = Date.now();
-        const diff = now - startMillis;
-
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const secs = Math.floor((diff % (1000 * 60)) / 1000);
-
-        document.getElementById('durationText').innerText = `${hours}시간 ${mins}분 ${secs}초`;
+    function startTimer(startMillis) {
+        if (interval) clearInterval(interval);
+        const update = () => {
+            const diff = Date.now() - startMillis;
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            document.getElementById('durationText').innerText = `${h}시간 ${m}분 ${s}초`;
+        };
+        interval = setInterval(update, 1000);
+        update();
     }
 
     onValue(dbRef, (snap) => {
         const data = snap.val();
-        const badge = document.getElementById('statusBadge');
-        const title = document.getElementById('statusTitle');
+        const timeDisplay = document.getElementById('timeDisplay');
         const loginArea = document.getElementById('loginArea');
         const logoutArea = document.getElementById('logoutArea');
-        const timeDisplay = document.getElementById('timeDisplay');
-        
-        // 기존 타이머 정지
-        if (timerInterval) clearInterval(timerInterval);
 
         if (data && data.active) {
-            badge.innerText = "🚨 접속 중";
-            badge.className = "badge busy";
-            title.innerText = data.user + " 님이 사용 중입니다.";
+            document.getElementById('statusBadge').className = "badge busy";
+            document.getElementById('statusBadge').innerText = "🚨 접속 중";
+            document.getElementById('statusTitle').innerText = data.user + " 님이 사용 중";
             
             loginArea.classList.add('hidden');
             logoutArea.classList.remove('hidden');
             timeDisplay.classList.remove('hidden');
 
-            if (data.startTime) {
-                const startDate = new Date(data.startTime);
-                document.getElementById('startTimeText').innerText = startDate.toLocaleString();
-                
-                // 1초마다 타이머 업데이트
-                timerInterval = setInterval(() => updateTimer(data.startTime), 1000);
-                updateTimer(data.startTime);
+            // 서버 시간(startTime)이 아직 도착 안 했으면 로컬 시간(localStartTime) 사용
+            const timeSource = data.startTime || data.localStartTime;
+            if (timeSource) {
+                document.getElementById('startTimeText').innerText = new Date(timeSource).toLocaleTimeString();
+                startTimer(timeSource);
             }
         } else {
-            badge.innerText = "✅ 사용 가능";
-            badge.className = "badge free";
-            title.innerText = "현재 비어있음";
+            if (interval) clearInterval(interval);
+            document.getElementById('statusBadge').className = "badge free";
+            document.getElementById('statusBadge').innerText = "✅ 사용 가능";
+            document.getElementById('statusTitle').innerText = "현재 비어있음";
             loginArea.classList.remove('hidden');
             logoutArea.classList.add('hidden');
             timeDisplay.classList.add('hidden');
-            
-            myName = "";
-            document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
             document.getElementById('inBtn').disabled = true;
+            document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
         }
     });
 </script>

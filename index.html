@@ -1,217 +1,115 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>툴 사용 현황</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:0; padding:24px; }
-    .wrap { max-width: 520px; margin: 0 auto; }
-    h1 { font-size: 20px; margin: 0 0 16px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; }
-    label { display:flex; gap:8px; align-items:center; padding:10px 12px; border:1px solid #eee; border-radius: 10px; cursor:pointer; }
-    button { width:100%; margin-top:12px; padding:12px; border-radius:10px; border:1px solid #ccc; cursor:pointer; font-size:16px; }
-    button.primary { border-color:#111; }
-    .muted { color:#666; font-size: 13px; margin-top:10px; }
-    .status { margin-top: 12px; padding: 12px; border-radius: 10px; background: #f7f7f7; }
-    .danger { background:#fff1f1; border:1px solid #ffd0d0; }
-    .ok { background:#f1fff3; border:1px solid #c9ffd1; }
-    .small { font-size: 12px; color:#555; margin-top:10px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>시뮬레이션 사용 현황</title>
+    <style>
+        :root { --primary: #4a90e2; --danger: #e74c3c; --bg: #f5f6fa; }
+        body { font-family: 'Pretendard', sans-serif; background: var(--bg); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .app-container { background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
+        .status-badge { display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: bold; margin-bottom: 20px; }
+        .status-free { background: #e1f5fe; color: #01579b; }
+        .status-busy { background: #ffebee; color: #c62828; }
+        .user-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
+        .user-option { border: 2px solid #ddd; padding: 15px; border-radius: 12px; cursor: pointer; transition: 0.3s; }
+        .user-option.active { border-color: var(--primary); background: #f0f7ff; color: var(--primary); }
+        button { width: 100%; padding: 15px; border: none; border-radius: 12px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-connect { background: var(--primary); color: white; }
+        .btn-disconnect { background: var(--danger); color: white; }
+        .hidden { display: none; }
+    </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>시뮬레이션 툴 사용 현황</h1>
-    <div class="card">
-      <div id="view-select">
-        <div class="row" id="name-options"></div>
-        <button class="primary" id="btn-connect">접속</button>
-        <div class="muted">한 번에 한 사람만 “접속중”으로 표시됩니다.</div>
-        <div class="status danger" id="firebase-warning" style="display:none;"></div>
-      </div>
 
-      <div id="view-using" style="display:none;">
-        <div class="status ok" id="using-text"></div>
-        <button id="btn-disconnect">접속 종료</button>
-        <div class="small" id="since-text"></div>
-      </div>
-
-      <div class="status danger" id="lock-info" style="display:none;"></div>
+<div class="app-container">
+    <div id="statusArea">
+        <div id="statusDisplay" class="status-badge status-free">현재 사용 가능</div>
+        <h2 id="mainMessage">지금 누가 쓸까요?</h2>
     </div>
-  </div>
 
-  <script type="module">
-    const NAMES = ["지영", "현우", "재현", "세형"];
+    <div id="setupView">
+        <div class="user-grid" id="userList">
+            <div class="user-option" onclick="selectUser('재현')">재현</div>
+            <div class="user-option" onclick="selectUser('현우')">현우</div>
+            <div class="user-option" onclick="selectUser('세형')">세형</div>
+            <div class="user-option" onclick="selectUser('지영')">지영</div>
+        </div>
+        <button class="btn-connect" id="connectBtn" onclick="startUsing()" disabled>접속하기</button>
+    </div>
 
-    const viewSelect = document.getElementById("view-select");
-    const viewUsing = document.getElementById("view-using");
-    const nameOptions = document.getElementById("name-options");
-    const btnConnect = document.getElementById("btn-connect");
-    const btnDisconnect = document.getElementById("btn-disconnect");
-    const usingText = document.getElementById("using-text");
-    const sinceText = document.getElementById("since-text");
-    const lockInfo = document.getElementById("lock-info");
-    const firebaseWarning = document.getElementById("firebase-warning");
+    <div id="usingView" class="hidden">
+        <button class="btn-disconnect" onclick="stopUsing()">접속 종료</button>
+    </div>
+</div>
 
-    let selectedName = null;
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // ✅ 1) 체크박스는 Firebase와 무관하게 무조건 먼저 렌더링
-    function renderOptions() {
-      nameOptions.innerHTML = "";
-      NAMES.forEach((n) => {
-        const label = document.createElement("label");
-        label.innerHTML = `<input type="checkbox" /><span>${n}</span>`;
-        const cb = label.querySelector("input");
+    // 🔴 중요: 본인의 Firebase 설정값으로 교체해야 합니다!
+    const firebaseConfig = {
+        databaseURL: "https://your-project-id-default-rtdb.firebaseio.com/"
+    };
 
-        cb.addEventListener("change", (e) => {
-          if (e.target.checked) {
-            [...nameOptions.querySelectorAll("input")].forEach(x => { if (x !== cb) x.checked = false; });
-            selectedName = n;
-          } else {
-            selectedName = null;
-          }
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const statusRef = ref(db, 'sim-status');
+
+    let currentUser = "";
+
+    // 실시간 상태 감시
+    onValue(statusRef, (snapshot) => {
+        const data = snapshot.val();
+        updateUI(data);
+    });
+
+    // 사용자 선택 함수
+    window.selectUser = (name) => {
+        currentUser = name;
+        document.querySelectorAll('.user-option').forEach(el => {
+            el.classList.toggle('active', el.innerText === name);
         });
+        document.getElementById('connectBtn').disabled = false;
+    };
 
-        nameOptions.appendChild(label);
-      });
+    // 접속 시작
+    window.startUsing = () => {
+        set(statusRef, { user: currentUser, isBusy: true });
+    };
+
+    // 접속 종료
+    window.stopUsing = () => {
+        set(statusRef, { user: "", isBusy: false });
+    };
+
+    // UI 업데이트 로직
+    function updateUI(data) {
+        const display = document.getElementById('statusDisplay');
+        const msg = document.getElementById('mainMessage');
+        const setup = document.getElementById('setupView');
+        const using = document.getElementById('usingView');
+
+        if (data && data.isBusy) {
+            display.innerText = "🚨 접속 중";
+            display.className = "status-badge status-busy";
+            msg.innerText = `${data.user} 님이 사용 중입니다.`;
+            
+            // 내가 접속 중이라면 종료 버튼만 보여줌
+            if (data.user === currentUser) {
+                setup.classList.add('hidden');
+                using.classList.remove('hidden');
+            } else {
+                setup.classList.add('hidden'); // 다른 사람이 쓰면 선택 못하게 숨김
+            }
+        } else {
+            display.innerText = "✅ 사용 가능";
+            display.className = "status-badge status-free";
+            msg.innerText = "지금 누가 쓸까요?";
+            setup.classList.remove('hidden');
+            using.classList.add('hidden');
+        }
     }
-    renderOptions();
-
-    function showSelect() {
-      viewSelect.style.display = "";
-      viewUsing.style.display = "none";
-    }
-    function showUsing(name, sinceMs) {
-      viewSelect.style.display = "none";
-      viewUsing.style.display = "";
-      usingText.textContent = `${name} 접속중`;
-      sinceText.textContent = sinceMs ? `시작: ${new Date(sinceMs).toLocaleString("ko-KR")}` : "";
-    }
-
-    // ------------------------------------------------------------
-    // ✅ 2) Firebase 연결 (실패해도 UI는 유지)
-    // ------------------------------------------------------------
-    let db = null, lockRef = null;
-    let currentLock = null;
-    const mySessionKey = "my_lock_name";
-
-    // TODO: 여기 firebaseConfig를 너 값으로 교체해야 "팀 공유" 됨
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBMWnX2Byqh-wyE-ffOlL3MdgCnn5TZNWY",
-  authDomain: "simulation-lock.firebaseapp.com",
-  databaseURL: "https://simulation-lock-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "simulation-lock",
-  storageBucket: "simulation-lock.firebasestorage.app",
-  messagingSenderId: "175797786819",
-  appId: "1:175797786819:web:650ba8e1b2eae70776ea76"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-
-    function isPlaceholderConfig(cfg) {
-      return Object.values(cfg).some(v => typeof v === "string" && v.includes("YOUR_"));
-    }
-
-    if (isPlaceholderConfig(firebaseConfig)) {
-      firebaseWarning.style.display = "";
-      firebaseWarning.textContent = "⚠️ Firebase 설정이 아직 비어있어서(placeholder) 지금은 팀 공유가 안 됩니다. 그래도 화면(체크박스/접속)은 뜹니다.";
-    } else {
-      try {
-        const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js");
-        const { getDatabase, ref, onValue, runTransaction } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js");
-
-        const app = initializeApp(firebaseConfig);
-        db = getDatabase(app);
-        lockRef = ref(db, "lock");
-
-        onValue(lockRef, (snap) => {
-          currentLock = snap.val(); // {name, since}
-
-          if (!currentLock) {
-            lockInfo.style.display = "none";
-            showSelect();
-            return;
-          }
-
-          const name = currentLock.name;
-          const since = currentLock.since;
-
-          if (localStorage.getItem(mySessionKey) === name) {
-            lockInfo.style.display = "none";
-            showUsing(name, since);
-          } else {
-            lockInfo.style.display = "";
-            lockInfo.textContent = `현재 ${name} 사용중입니다. (다른 사람은 접속할 수 없음)`;
-            showSelect();
-          }
-        });
-
-        // 접속(락 획득)
-        btnConnect.addEventListener("click", async () => {
-          if (!selectedName) return alert("이름을 하나 선택해줘.");
-          if (!lockRef) return alert("Firebase가 연결되지 않아 팀 공유 접속은 불가해. (설정 확인)");
-
-          const result = await runTransaction(lockRef, (curr) => {
-            if (curr === null) return { name: selectedName, since: Date.now() };
-            return; // abort
-          });
-
-          if (!result.committed) {
-            alert(`이미 ${result.snapshot.val()?.name ?? "다른 사람"}이(가) 사용중이야.`);
-            return;
-          }
-
-          localStorage.setItem(mySessionKey, selectedName);
-          showUsing(selectedName, Date.now());
-        });
-
-        // 접속 종료(락 해제)
-        btnDisconnect.addEventListener("click", async () => {
-          const mine = localStorage.getItem(mySessionKey);
-          if (!mine) return showSelect();
-          if (!lockRef) return alert("Firebase가 연결되지 않았어.");
-
-          const result = await runTransaction(lockRef, (curr) => {
-            if (curr && curr.name === mine) return null;
-            return; // abort
-          });
-
-          localStorage.removeItem(mySessionKey);
-          selectedName = null;
-          renderOptions();
-          showSelect();
-
-          if (!result.committed) alert("이미 다른 상태로 변경되어서 종료 처리가 안 됐을 수 있어.");
-        });
-
-      } catch (e) {
-        console.error(e);
-        firebaseWarning.style.display = "";
-        firebaseWarning.textContent = "⚠️ Firebase 초기화 중 오류가 나서 팀 공유 기능이 꺼졌어. (콘솔 확인) 그래도 UI는 정상 표시돼.";
-      }
-    }
-
-    // Firebase 없을 때도 버튼이 먹통이면 안 되니 안내만
-    if (!db) {
-      btnConnect.addEventListener("click", () => {
-        if (!selectedName) return alert("이름을 하나 선택해줘.");
-        alert("현재 Firebase 설정이 없어서 팀 공유 접속은 불가해. (하지만 UI는 정상)");
-      });
-      btnDisconnect.addEventListener("click", () => {
-        selectedName = null;
-        renderOptions();
-        showSelect();
-      });
-    }
-  </script>
+</script>
 </body>
 </html>
-

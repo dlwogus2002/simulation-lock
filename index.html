@@ -17,7 +17,7 @@
     .status { margin-top: 12px; padding: 12px; border-radius: 10px; background: #f7f7f7; }
     .danger { background:#fff1f1; border:1px solid #ffd0d0; }
     .ok { background:#f1fff3; border:1px solid #c9ffd1; }
-    .small { font-size: 12px; color:#555; }
+    .small { font-size: 12px; color:#555; margin-top:10px; }
   </style>
 </head>
 <body>
@@ -25,11 +25,10 @@
     <h1>시뮬레이션 툴 사용 현황</h1>
     <div class="card">
       <div id="view-select">
-        <div class="row" id="name-options">
-          <!-- checkboxes injected -->
-        </div>
+        <div class="row" id="name-options"></div>
         <button class="primary" id="btn-connect">접속</button>
         <div class="muted">한 번에 한 사람만 “접속중”으로 표시됩니다.</div>
+        <div class="status danger" id="firebase-warning" style="display:none;"></div>
       </div>
 
       <div id="view-using" style="display:none;">
@@ -42,28 +41,8 @@
     </div>
   </div>
 
-  <!-- Firebase (v10+) -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import { getDatabase, ref, onValue, runTransaction, set, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
-
-    // TODO: 여기를 너 Firebase 프로젝트 설정으로 교체
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_AUTH_DOMAIN",
-      databaseURL: "YOUR_DATABASE_URL",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_STORAGE_BUCKET",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
-    };
-
     const NAMES = ["지영", "현우", "재현", "세형"];
-
-    const app = initializeApp(firebaseConfig);
-    const db = getDatabase(app);
-
-    const lockRef = ref(db, "lock");
 
     const viewSelect = document.getElementById("view-select");
     const viewUsing = document.getElementById("view-using");
@@ -73,27 +52,20 @@
     const usingText = document.getElementById("using-text");
     const sinceText = document.getElementById("since-text");
     const lockInfo = document.getElementById("lock-info");
+    const firebaseWarning = document.getElementById("firebase-warning");
 
-    // UI state
     let selectedName = null;
-    let currentLock = null;
-    const mySessionKey = "my_lock_name";
-    const myName = localStorage.getItem(mySessionKey);
 
-    // Build checkboxes (single-select behavior)
+    // ✅ 1) 체크박스는 Firebase와 무관하게 무조건 먼저 렌더링
     function renderOptions() {
       nameOptions.innerHTML = "";
       NAMES.forEach((n) => {
-        const id = "cb_" + n;
         const label = document.createElement("label");
-        label.innerHTML = `
-          <input type="checkbox" id="${id}" />
-          <span>${n}</span>
-        `;
+        label.innerHTML = `<input type="checkbox" /><span>${n}</span>`;
         const cb = label.querySelector("input");
+
         cb.addEventListener("change", (e) => {
           if (e.target.checked) {
-            // uncheck others
             [...nameOptions.querySelectorAll("input")].forEach(x => { if (x !== cb) x.checked = false; });
             selectedName = n;
           } else {
@@ -101,16 +73,9 @@
           }
         });
 
-        // if we had previous selection
-        if (myName === n) {
-          cb.checked = true;
-          selectedName = n;
-        }
-
         nameOptions.appendChild(label);
       });
     }
-
     renderOptions();
 
     function showSelect() {
@@ -121,102 +86,123 @@
       viewSelect.style.display = "none";
       viewUsing.style.display = "";
       usingText.textContent = `${name} 접속중`;
-      if (sinceMs) {
-        const d = new Date(sinceMs);
-        sinceText.textContent = `시작: ${d.toLocaleString("ko-KR")}`;
-      } else {
-        sinceText.textContent = "";
+      sinceText.textContent = sinceMs ? `시작: ${new Date(sinceMs).toLocaleString("ko-KR")}` : "";
+    }
+
+    // ------------------------------------------------------------
+    // ✅ 2) Firebase 연결 (실패해도 UI는 유지)
+    // ------------------------------------------------------------
+    let db = null, lockRef = null;
+    let currentLock = null;
+    const mySessionKey = "my_lock_name";
+
+    // TODO: 여기 firebaseConfig를 너 값으로 교체해야 "팀 공유" 됨
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      databaseURL: "YOUR_DATABASE_URL",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_STORAGE_BUCKET",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    function isPlaceholderConfig(cfg) {
+      return Object.values(cfg).some(v => typeof v === "string" && v.includes("YOUR_"));
+    }
+
+    if (isPlaceholderConfig(firebaseConfig)) {
+      firebaseWarning.style.display = "";
+      firebaseWarning.textContent = "⚠️ Firebase 설정이 아직 비어있어서(placeholder) 지금은 팀 공유가 안 됩니다. 그래도 화면(체크박스/접속)은 뜹니다.";
+    } else {
+      try {
+        const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js");
+        const { getDatabase, ref, onValue, runTransaction } = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js");
+
+        const app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+        lockRef = ref(db, "lock");
+
+        onValue(lockRef, (snap) => {
+          currentLock = snap.val(); // {name, since}
+
+          if (!currentLock) {
+            lockInfo.style.display = "none";
+            showSelect();
+            return;
+          }
+
+          const name = currentLock.name;
+          const since = currentLock.since;
+
+          if (localStorage.getItem(mySessionKey) === name) {
+            lockInfo.style.display = "none";
+            showUsing(name, since);
+          } else {
+            lockInfo.style.display = "";
+            lockInfo.textContent = `현재 ${name} 사용중입니다. (다른 사람은 접속할 수 없음)`;
+            showSelect();
+          }
+        });
+
+        // 접속(락 획득)
+        btnConnect.addEventListener("click", async () => {
+          if (!selectedName) return alert("이름을 하나 선택해줘.");
+          if (!lockRef) return alert("Firebase가 연결되지 않아 팀 공유 접속은 불가해. (설정 확인)");
+
+          const result = await runTransaction(lockRef, (curr) => {
+            if (curr === null) return { name: selectedName, since: Date.now() };
+            return; // abort
+          });
+
+          if (!result.committed) {
+            alert(`이미 ${result.snapshot.val()?.name ?? "다른 사람"}이(가) 사용중이야.`);
+            return;
+          }
+
+          localStorage.setItem(mySessionKey, selectedName);
+          showUsing(selectedName, Date.now());
+        });
+
+        // 접속 종료(락 해제)
+        btnDisconnect.addEventListener("click", async () => {
+          const mine = localStorage.getItem(mySessionKey);
+          if (!mine) return showSelect();
+          if (!lockRef) return alert("Firebase가 연결되지 않았어.");
+
+          const result = await runTransaction(lockRef, (curr) => {
+            if (curr && curr.name === mine) return null;
+            return; // abort
+          });
+
+          localStorage.removeItem(mySessionKey);
+          selectedName = null;
+          renderOptions();
+          showSelect();
+
+          if (!result.committed) alert("이미 다른 상태로 변경되어서 종료 처리가 안 됐을 수 있어.");
+        });
+
+      } catch (e) {
+        console.error(e);
+        firebaseWarning.style.display = "";
+        firebaseWarning.textContent = "⚠️ Firebase 초기화 중 오류가 나서 팀 공유 기능이 꺼졌어. (콘솔 확인) 그래도 UI는 정상 표시돼.";
       }
     }
 
-    // Listen lock changes for everyone
-    onValue(lockRef, (snap) => {
-      currentLock = snap.val(); // {name, since}
-      if (!currentLock) {
-        lockInfo.style.display = "none";
-        // If I thought I was using, reset
-        if (localStorage.getItem(mySessionKey)) {
-          // keep name selection but show select screen
-          showSelect();
-        }
-        return;
-      }
-
-      const name = currentLock.name;
-      const since = currentLock.since;
-
-      // If it's me, show using screen
-      if (localStorage.getItem(mySessionKey) === name) {
-        lockInfo.style.display = "none";
-        showUsing(name, since);
-      } else {
-        // someone else is using
-        lockInfo.style.display = "";
-        lockInfo.textContent = `현재 ${name} 사용중입니다. (다른 사람은 접속할 수 없음)`;
-        showSelect();
-      }
-    });
-
-    // Acquire lock atomically
-    btnConnect.addEventListener("click", async () => {
-      if (!selectedName) {
-        alert("이름을 하나 선택해줘.");
-        return;
-      }
-
-      // Transaction: set lock if empty
-      try {
-        const result = await runTransaction(lockRef, (curr) => {
-          if (curr === null) {
-            return { name: selectedName, since: Date.now() };
-          }
-          return; // abort
-        });
-
-        if (!result.committed) {
-          alert(`이미 ${result.snapshot.val()?.name ?? "다른 사람"}이(가) 사용중이야.`);
-          return;
-        }
-
-        localStorage.setItem(mySessionKey, selectedName);
-        showUsing(selectedName, Date.now());
-      } catch (e) {
-        console.error(e);
-        alert("접속 처리 중 오류가 발생했어.");
-      }
-    });
-
-    // Release lock (only if it's mine)
-    btnDisconnect.addEventListener("click", async () => {
-      const mine = localStorage.getItem(mySessionKey);
-      if (!mine) {
-        // just reset UI
-        showSelect();
-        return;
-      }
-
-      // Transaction: remove only if lock holder matches me
-      try {
-        const result = await runTransaction(lockRef, (curr) => {
-          if (curr && curr.name === mine) return null; // remove
-          return; // abort
-        });
-
-        localStorage.removeItem(mySessionKey);
-
-        // Reset checkboxes selection
+    // Firebase 없을 때도 버튼이 먹통이면 안 되니 안내만
+    if (!db) {
+      btnConnect.addEventListener("click", () => {
+        if (!selectedName) return alert("이름을 하나 선택해줘.");
+        alert("현재 Firebase 설정이 없어서 팀 공유 접속은 불가해. (하지만 UI는 정상)");
+      });
+      btnDisconnect.addEventListener("click", () => {
         selectedName = null;
         renderOptions();
         showSelect();
-
-        if (!result.committed) {
-          alert("이미 다른 상태로 변경되어서 종료 처리할 수 없었어.");
-        }
-      } catch (e) {
-        console.error(e);
-        alert("접속 종료 중 오류가 발생했어.");
-      }
-    });
+      });
+    }
   </script>
 </body>
 </html>
+

@@ -3,115 +3,107 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>시뮬레이션 사용 현황</title>
+    <title>시뮬레이션 점유 현황</title>
     <style>
-        :root { --primary: #4a90e2; --danger: #e74c3c; --bg: #f5f6fa; }
-        body { font-family: 'Pretendard', sans-serif; background: var(--bg); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .app-container { background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
-        .status-badge { display: inline-block; padding: 8px 16px; border-radius: 20px; font-weight: bold; margin-bottom: 20px; }
-        .status-free { background: #e1f5fe; color: #01579b; }
-        .status-busy { background: #ffebee; color: #c62828; }
-        .user-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
-        .user-option { border: 2px solid #ddd; padding: 15px; border-radius: 12px; cursor: pointer; transition: 0.3s; }
-        .user-option.active { border-color: var(--primary); background: #f0f7ff; color: var(--primary); }
-        button { width: 100%; padding: 15px; border: none; border-radius: 12px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .btn-connect { background: var(--primary); color: white; }
-        .btn-disconnect { background: var(--danger); color: white; }
+        body { font-family: sans-serif; background: #f5f7fa; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 350px; text-align: center; }
+        .badge { padding: 8px 16px; border-radius: 50px; font-weight: bold; display: inline-block; margin-bottom: 15px; }
+        .free { background: #e3f2fd; color: #1976d2; }
+        .busy { background: #ffebee; color: #d32f2f; }
+        .user-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
+        .user-item { border: 1px solid #ddd; padding: 10px; border-radius: 8px; cursor: pointer; }
+        .user-item.selected { border: 2px solid #d32f2f; background: #fff5f5; color: #d32f2f; font-weight: bold; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .btn-in { background: #d32f2f; color: white; }
+        .btn-out { background: #e74c3c; color: white; }
+        .warning-text { color: #e74c3c; font-size: 13px; margin-top: 12px; font-weight: bold; display: block; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
-<div class="app-container">
-    <div id="statusArea">
-        <div id="statusDisplay" class="status-badge status-free">현재 사용 가능</div>
-        <h2 id="mainMessage">지금 누가 쓸까요?</h2>
-    </div>
+<div class="card">
+    <div id="statusBadge" class="badge free">✅ 사용 가능</div>
+    <h2 id="statusTitle">현재 비어있음</h2>
 
-    <div id="setupView">
-        <div class="user-grid" id="userList">
-            <div class="user-option" onclick="selectUser('재현')">재현</div>
-            <div class="user-option" onclick="selectUser('현우')">현우</div>
-            <div class="user-option" onclick="selectUser('세형')">세형</div>
-            <div class="user-option" onclick="selectUser('지영')">지영</div>
+    <div id="loginArea">
+        <p>누가 사용하시나요?</p>
+        <div class="user-list">
+            <div class="user-item" onclick="sel('재현')">재현</div>
+            <div class="user-item" onclick="sel('현우')">현우</div>
+            <div class="user-item" onclick="sel('세형')">세형</div>
+            <div class="user-item" onclick="sel('지영')">지영</div>
         </div>
-        <button class="btn-connect" id="connectBtn" onclick="startUsing()" disabled>접속하기</button>
+        <button id="inBtn" class="btn-in" onclick="connect()" disabled>접속하기</button>
     </div>
 
-    <div id="usingView" class="hidden">
-        <button class="btn-disconnect" onclick="stopUsing()">접속 종료</button>
+    <div id="logoutArea" class="hidden">
+        <button class="btn-out" onclick="disconnect()">접속 종료</button>
+        <span class="warning-text">⚠️ 본인 외에 누르지 마세요</span>
     </div>
 </div>
 
 <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-    // 🔴 중요: 본인의 Firebase 설정값으로 교체해야 합니다!
     const firebaseConfig = {
         databaseURL: "https://simapp-a2c75-default-rtdb.asia-southeast1.firebasedatabase.app/"
     };
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
-    const statusRef = ref(db, 'sim-status');
+    const dbRef = ref(db, 'room/status');
 
-    let currentUser = "";
+    let myName = "";
 
-    // 실시간 상태 감시
-    onValue(statusRef, (snapshot) => {
-        const data = snapshot.val();
-        updateUI(data);
-    });
-
-    // 사용자 선택 함수
-    window.selectUser = (name) => {
-        currentUser = name;
-        document.querySelectorAll('.user-option').forEach(el => {
-            el.classList.toggle('active', el.innerText === name);
+    window.sel = (name) => {
+        myName = name;
+        document.querySelectorAll('.user-item').forEach(el => {
+            el.classList.toggle('selected', el.innerText === name);
         });
-        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('inBtn').disabled = false;
     };
 
-    // 접속 시작
-    window.startUsing = () => {
-        set(statusRef, { user: currentUser, isBusy: true });
+    window.connect = () => {
+        set(dbRef, { user: myName, active: true });
     };
 
-    // 접속 종료
-    window.stopUsing = () => {
-        set(statusRef, { user: "", isBusy: false });
-    };
-
-    // UI 업데이트 로직
-    function updateUI(data) {
-        const display = document.getElementById('statusDisplay');
-        const msg = document.getElementById('mainMessage');
-        const setup = document.getElementById('setupView');
-        const using = document.getElementById('usingView');
-
-        if (data && data.isBusy) {
-            display.innerText = "🚨 접속 중";
-            display.className = "status-badge status-busy";
-            msg.innerText = `${data.user} 님이 사용 중입니다.`;
-            
-            // 내가 접속 중이라면 종료 버튼만 보여줌
-            if (data.user === currentUser) {
-                setup.classList.add('hidden');
-                using.classList.remove('hidden');
-            } else {
-                setup.classList.add('hidden'); // 다른 사람이 쓰면 선택 못하게 숨김
-            }
-        } else {
-            display.innerText = "✅ 사용 가능";
-            display.className = "status-badge status-free";
-            msg.innerText = "지금 누가 쓸까요?";
-            setup.classList.remove('hidden');
-            using.classList.add('hidden');
+    window.disconnect = () => {
+        if(confirm("정말로 접속을 종료하시겠습니까?")) {
+            set(dbRef, { user: "", active: false });
         }
-    }
+    };
+
+    onValue(dbRef, (snap) => {
+        const data = snap.val();
+        const badge = document.getElementById('statusBadge');
+        const title = document.getElementById('statusTitle');
+        const loginArea = document.getElementById('loginArea');
+        const logoutArea = document.getElementById('logoutArea');
+
+        if (data && data.active) {
+            badge.innerText = "🚨 접속 중";
+            badge.className = "badge busy";
+            title.innerText = data.user + " 님이 사용 중입니다.";
+            
+            // 핵심 변경: 누군가 사용 중이면 누구나 '접속 종료' 버튼을 볼 수 있음
+            loginArea.classList.add('hidden');
+            logoutArea.classList.remove('hidden');
+        } else {
+            badge.innerText = "✅ 사용 가능";
+            badge.className = "badge free";
+            title.innerText = "현재 비어있음";
+            loginArea.classList.remove('hidden');
+            logoutArea.classList.add('hidden');
+            
+            // 초기화
+            myName = "";
+            document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
+            document.getElementById('inBtn').disabled = true;
+        }
+    });
 </script>
+
 </body>
 </html>
-
-

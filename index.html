@@ -6,17 +6,19 @@
     <title>시뮬레이션 점유 현황</title>
     <style>
         body { font-family: sans-serif; background: #f5f7fa; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 350px; text-align: center; }
-        .badge { padding: 8px 16px; border-radius: 50px; font-weight: bold; display: inline-block; margin-bottom: 15px; }
+        .card { background: white; padding: 2.5rem 2rem; border-radius: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); width: 380px; text-align: center; }
+        .badge { padding: 8px 18px; border-radius: 50px; font-weight: bold; display: inline-block; margin-bottom: 25px; font-size: 14px; }
         .free { background: #e3f2fd; color: #1976d2; }
-        .busy { background: #ffebee; color: #d32f2f; }
-        .user-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
-        .user-item { border: 1px solid #ddd; padding: 10px; border-radius: 8px; cursor: pointer; }
-        .user-item.selected { border: 2px solid #d32f2f; background: #fff5f5; color: #d32f2f; font-weight: bold; }
-        button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; }
-        .btn-in { background: #d32f2f; color: white; }
-        .btn-out { background: #e74c3c; color: white; }
-        .warning-text { color: #e74c3c; font-size: 13px; margin-top: 12px; font-weight: bold; display: block; }
+        .busy { background: #fff1f2; color: #e11d48; }
+        .user-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+        .user-item { border: 1px solid #eee; padding: 12px; border-radius: 12px; cursor: pointer; transition: 0.2s; }
+        .user-item.selected { border: 2px solid #e11d48; background: #fff1f2; color: #e11d48; font-weight: bold; }
+        button { width: 100%; padding: 15px; border: none; border-radius: 12px; font-size: 16px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .btn-in { background: #e11d48; color: white; }
+        .btn-out { background: #e11d48; color: white; margin-top: 15px; }
+        .time-info { background: #f8fafc; padding: 15px; border-radius: 12px; margin: 20px 0; font-size: 14px; color: #64748b; line-height: 1.6; }
+        .timer-highlight { color: #e11d48; font-weight: bold; font-size: 16px; }
+        .warning-text { color: #f43f5e; font-size: 13px; margin-top: 15px; font-weight: bold; display: block; }
         .hidden { display: none; }
     </style>
 </head>
@@ -24,10 +26,15 @@
 
 <div class="card">
     <div id="statusBadge" class="badge free">✅ 사용 가능</div>
-    <h2 id="statusTitle">현재 비어있음</h2>
+    <h2 id="statusTitle" style="margin-bottom: 10px;">현재 비어있음</h2>
+
+    <div id="timeDisplay" class="time-info hidden">
+        <div>접속 시간: <span id="startTimeText">-</span></div>
+        <div style="margin-top: 5px;">현재 <span id="durationText" class="timer-highlight">0시간 0분 0초</span> 째 사용 중</div>
+    </div>
 
     <div id="loginArea">
-        <p>누가 사용하시나요?</p>
+        <p style="color: #666;">누가 사용하시나요?</p>
         <div class="user-list">
             <div class="user-item" onclick="sel('재현')">재현</div>
             <div class="user-item" onclick="sel('현우')">현우</div>
@@ -45,7 +52,7 @@
 
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+    import { getDatabase, ref, set, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
     const firebaseConfig = {
         databaseURL: "https://simapp-a2c75-default-rtdb.asia-southeast1.firebasedatabase.app/"
@@ -56,24 +63,40 @@
     const dbRef = ref(db, 'room/status');
 
     let myName = "";
+    let timerInterval = null;
 
     window.sel = (name) => {
         myName = name;
-        document.querySelectorAll('.user-item').forEach(el => {
-            el.classList.toggle('selected', el.innerText === name);
-        });
+        document.querySelectorAll('.user-item').forEach(el => el.classList.toggle('selected', el.innerText === name));
         document.getElementById('inBtn').disabled = false;
     };
 
     window.connect = () => {
-        set(dbRef, { user: myName, active: true });
+        // serverTimestamp를 사용하여 서버의 정확한 시간을 기록합니다.
+        set(dbRef, { 
+            user: myName, 
+            active: true, 
+            startTime: serverTimestamp() 
+        });
     };
 
     window.disconnect = () => {
         if(confirm("정말로 접속을 종료하시겠습니까?")) {
-            set(dbRef, { user: "", active: false });
+            set(dbRef, { user: "", active: false, startTime: null });
         }
     };
+
+    // 경과 시간 계산 함수
+    function updateTimer(startMillis) {
+        const now = Date.now();
+        const diff = now - startMillis;
+
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const secs = Math.floor((diff % (1000 * 60)) / 1000);
+
+        document.getElementById('durationText').innerText = `${hours}시간 ${mins}분 ${secs}초`;
+    }
 
     onValue(dbRef, (snap) => {
         const data = snap.val();
@@ -81,23 +104,36 @@
         const title = document.getElementById('statusTitle');
         const loginArea = document.getElementById('loginArea');
         const logoutArea = document.getElementById('logoutArea');
+        const timeDisplay = document.getElementById('timeDisplay');
+        
+        // 기존 타이머 정지
+        if (timerInterval) clearInterval(timerInterval);
 
         if (data && data.active) {
             badge.innerText = "🚨 접속 중";
             badge.className = "badge busy";
             title.innerText = data.user + " 님이 사용 중입니다.";
             
-            // 핵심 변경: 누군가 사용 중이면 누구나 '접속 종료' 버튼을 볼 수 있음
             loginArea.classList.add('hidden');
             logoutArea.classList.remove('hidden');
+            timeDisplay.classList.remove('hidden');
+
+            if (data.startTime) {
+                const startDate = new Date(data.startTime);
+                document.getElementById('startTimeText').innerText = startDate.toLocaleString();
+                
+                // 1초마다 타이머 업데이트
+                timerInterval = setInterval(() => updateTimer(data.startTime), 1000);
+                updateTimer(data.startTime);
+            }
         } else {
             badge.innerText = "✅ 사용 가능";
             badge.className = "badge free";
             title.innerText = "현재 비어있음";
             loginArea.classList.remove('hidden');
             logoutArea.classList.add('hidden');
+            timeDisplay.classList.add('hidden');
             
-            // 초기화
             myName = "";
             document.querySelectorAll('.user-item').forEach(el => el.classList.remove('selected'));
             document.getElementById('inBtn').disabled = true;
@@ -107,4 +143,3 @@
 
 </body>
 </html>
-
